@@ -1,0 +1,111 @@
+global gConsole = GetConsole();
+global gProcess = GetProcess();
+global gClient = GetModule();
+
+def OpenProcessToCSGO()
+{
+    gConsole.Color(TCOL_YELLOW);
+    gConsole.Print("Waiting for CSGO...\n");
+
+    while (true)
+    {
+        if (gProcess.Find("csgo.exe")) { break; }
+        Sleep(1000);
+    }
+
+    if (!gProcess.OpenHandle(PROCESS_ALL_ACCESS))
+    {
+        gConsole.Color(TCOL_RED);
+        gConsole.Print("Couldn't open handle!");
+        return false;
+    }
+
+    gConsole.Color(TCOL_YELLOW);
+    gConsole.Print("Waiting for client.dll...\n\n");
+    while (true)
+    {
+        if (gProcess.FindModule(gClient, "client.dll")) { break; }
+        Sleep(1000);
+    }
+
+    return true;
+}
+
+global FL_ONGROUND = (1 << 0);
+
+class COffsets
+{
+    var dwLocalPlayer;
+    var dwForceJump;
+
+    var m_iHealth;
+    var m_fFlags;
+
+    def COffsets() { }
+}
+global gOffsets = COffsets();
+
+def Bhop()
+{
+    var vJump = [ 0x6 ];
+    var vUnjump = [ 0x4 ];
+
+    while (true)
+    {
+        if (KeyDown(' '))
+        {
+            var vLocalPlayer = gProcess.ReadInteger(gOffsets.dwLocalPlayer);
+            if (vLocalPlayer > 0x0 && gProcess.ReadInteger(vLocalPlayer + gOffsets.m_iHealth) > 0)
+            {
+                if ((gProcess.ReadInteger(vLocalPlayer + gOffsets.m_fFlags) & FL_ONGROUND) == 1)
+                {
+                    gProcess.WriteByte(gOffsets.dwForceJump, vJump);
+                }
+                else
+                {
+                    gProcess.WriteByte(gOffsets.dwForceJump, vUnjump);
+                }
+            }
+        }
+
+        Sleep(1);
+    }
+}
+
+def Main()
+{
+    if (!OpenProcessToCSGO()) { return; }
+
+    gConsole.Color(TCOL_YELLOW);
+    gConsole.Print("Updating offsets...\n");
+
+    gOffsets.dwLocalPlayer = gClient.SigScan("8D 34 85 ? ? ? ? 89 15 ? ? ? ? 8B 41 08 8B 48 04 83 F9 FF");
+    if (gOffsets.dwLocalPlayer != 0x0)
+    {
+        gConsole.Color(TCOL_GREEN);
+        gOffsets.dwLocalPlayer = gProcess.ReadInteger(gOffsets.dwLocalPlayer + 0x3) + 0x4;
+    }
+    else
+    {
+        gConsole.Color(TCOL_RED);
+    }
+    gConsole.Print("dwLocalPlayer: " + HexToString(gOffsets.dwLocalPlayer) + "\n");
+
+    gOffsets.dwForceJump = gClient.SigScan("8B 0D ? ? ? ? 8B D6 8B C1 83 CA 02");
+    if (gOffsets.dwForceJump != 0x0)
+    {
+        gConsole.Color(TCOL_GREEN);
+        gOffsets.dwForceJump = gProcess.ReadInteger(gOffsets.dwForceJump + 0x2);
+    }
+    else
+    {
+        gConsole.Color(TCOL_RED);
+    }
+    gConsole.Print("dwForceJump: " + HexToString(gOffsets.dwForceJump) + "\n");
+
+    gOffsets.m_iHealth = 0x100;
+    gOffsets.m_fFlags = 0x104;
+
+    CreateThread("Bhop");
+}
+Main();
